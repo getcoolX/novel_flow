@@ -12,11 +12,13 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "pydantic",
-    "pytest",
 ]
 
 [project.optional-dependencies]
-dev = []
+dev = [
+    "pytest",
+    "httpx",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
