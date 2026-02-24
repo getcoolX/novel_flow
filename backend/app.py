@@ -5,9 +5,10 @@ import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from backend.graph.nodes_llm import build_proposal as build_proposal_llm
+from backend.graph.graph import apply_decision as apply_decision_graph
+from backend.graph.graph import run_proposal as run_proposal_graph
 from backend.llm.client import LLMClient
-from backend.graph.schemas import ProposalPackage, ProposalStatus
+from backend.graph.schemas import ProposalPackage
 from backend.storage.sqlite import SessionsRepo
 
 
@@ -30,9 +31,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
     repo = SessionsRepo(db_path or os.getenv("NOVEL_FLOW_DB", "novel_flow.db"))
     llm_client = LLMClient()
 
-    def build_proposal(text: str, version: int, status: ProposalStatus) -> ProposalPackage:
-        return build_proposal_llm(text, version=version, status=status, client=llm_client)
-
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -47,19 +45,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        if session["proposal_json"] is None:
-            version = max(1, int(session["version"]))
-            pkg = build_proposal(session["requirement_text"], version=version, status=ProposalStatus.NEEDS_CONFIRMATION)
-            repo.update_session(
-                session_id,
-                spec_json=pkg.requirement_spec.model_dump(),
-                proposal_json=pkg.model_dump(mode="json"),
-                status=pkg.status.value,
-                version=pkg.version,
-            )
-            return pkg
-
-        return ProposalPackage.model_validate(session["proposal_json"])
+        return run_proposal_graph(session_id=session_id, repo=repo, client=llm_client)
 
     @app.post("/decision", response_model=ProposalPackage)
     def decision(payload: DecisionRequest) -> ProposalPackage:
@@ -67,51 +53,16 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        action = payload.action.lower()
-        if action == "approve":
-            current = session["proposal_json"]
-            if current is None:
-                version = max(1, int(session["version"]))
-                pkg = build_proposal(session["requirement_text"], version=version, status=ProposalStatus.APPROVED)
-            else:
-                pkg = ProposalPackage.model_validate(current)
-                pkg.status = ProposalStatus.APPROVED
-            repo.update_session(
-                payload.session_id,
-                proposal_json=pkg.model_dump(mode="json"),
-                spec_json=pkg.requirement_spec.model_dump(),
-                status=pkg.status.value,
-                version=pkg.version,
+        try:
+            return apply_decision_graph(
+                session_id=payload.session_id,
+                action=payload.action,
+                text=payload.text,
+                repo=repo,
+                client=llm_client,
             )
-            return pkg
-
-        if action == "edit":
-            patch_text = payload.text or ""
-            updated_requirement = (session["requirement_text"] + "\n" + patch_text).strip()
-            version = int(session["version"]) + 1
-            pkg = build_proposal(updated_requirement, version=version, status=ProposalStatus.NEEDS_CONFIRMATION)
-            repo.update_session(
-                payload.session_id,
-                requirement_text=updated_requirement,
-                spec_json=pkg.requirement_spec.model_dump(),
-                proposal_json=pkg.model_dump(mode="json"),
-                status=pkg.status.value,
-                version=pkg.version,
-            )
-            return pkg
-
-        if action == "reset":
-            repo.update_session(
-                payload.session_id,
-                spec_json=None,
-                proposal_json=None,
-                status=ProposalStatus.NEW.value,
-                version=0,
-            )
-            pkg = build_proposal(session["requirement_text"], version=0, status=ProposalStatus.NEW)
-            return pkg
-
-        raise HTTPException(status_code=400, detail="Unsupported action")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return app
 

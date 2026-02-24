@@ -29,19 +29,26 @@ class SessionsRepo:
                     proposal_json TEXT,
                     status TEXT NOT NULL,
                     version INTEGER NOT NULL,
+                    last_user_action TEXT,
+                    edit_text TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+            if "last_user_action" not in columns:
+                conn.execute("ALTER TABLE sessions ADD COLUMN last_user_action TEXT")
+            if "edit_text" not in columns:
+                conn.execute("ALTER TABLE sessions ADD COLUMN edit_text TEXT")
 
     def create_session(self, text: str) -> str:
         session_id = str(uuid.uuid4())
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sessions (session_id, requirement_text, spec_json, proposal_json, status, version)
-                VALUES (?, ?, NULL, NULL, 'NEW', 0)
+                INSERT INTO sessions (session_id, requirement_text, spec_json, proposal_json, status, version, last_user_action, edit_text)
+                VALUES (?, ?, NULL, NULL, 'NEW', 0, NULL, NULL)
                 """,
                 (session_id, text),
             )
