@@ -65,3 +65,58 @@ def test_approve_flips_status_to_approved(client: "TestClient") -> None:
     response = client.post("/decision", json={"session_id": session_id, "action": "approve"})
     assert response.status_code == 200
     assert response.json()["status"] == "APPROVED"
+
+
+def test_plan_returns_409_when_not_approved(client: "TestClient") -> None:
+    session_id = client.post("/intake", json={"text": "Plan a noir novel"}).json()["session_id"]
+    response = client.get(f"/plan/{session_id}")
+    assert response.status_code == 409
+
+
+def test_plan_generates_once_and_reuses_persisted_payload(client: "TestClient") -> None:
+    session_id = client.post("/intake", json={"text": "Plan a novel"}).json()["session_id"]
+    client.get(f"/proposal/{session_id}")
+    client.post("/decision", json={"session_id": session_id, "action": "approve"})
+
+    first = client.get(f"/plan/{session_id}")
+    assert first.status_code == 200
+    first_payload = first.json()
+
+    second = client.get(f"/plan/{session_id}")
+    assert second.status_code == 200
+    second_payload = second.json()
+
+    assert first_payload == second_payload
+
+
+def test_plan_second_call_does_not_reinvoke_generation(tmp_path, monkeypatch) -> None:
+    if not HAS_FASTAPI:
+        pytest.skip("fastapi is not installed")
+
+    from backend import app as app_module
+
+    calls = {"bible": 0, "outline": 0}
+
+    original_bible = app_module.freeze_bible_node
+    original_outline = app_module.plan_book_node
+
+    def tracked_bible(*args, **kwargs):
+        calls["bible"] += 1
+        return original_bible(*args, **kwargs)
+
+    def tracked_outline(*args, **kwargs):
+        calls["outline"] += 1
+        return original_outline(*args, **kwargs)
+
+    monkeypatch.setattr(app_module, "freeze_bible_node", tracked_bible)
+    monkeypatch.setattr(app_module, "plan_book_node", tracked_outline)
+
+    local_client = TestClient(app_module.create_app(str(tmp_path / "once.db")))
+    session_id = local_client.post("/intake", json={"text": "Plan a novel"}).json()["session_id"]
+    local_client.get(f"/proposal/{session_id}")
+    local_client.post("/decision", json={"session_id": session_id, "action": "approve"})
+
+    assert local_client.get(f"/plan/{session_id}").status_code == 200
+    assert local_client.get(f"/plan/{session_id}").status_code == 200
+
+    assert calls == {"bible": 1, "outline": 1}
