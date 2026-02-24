@@ -5,7 +5,8 @@ import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from backend.graph.placeholder import build_proposal
+from backend.graph.nodes_llm import build_proposal as build_proposal_llm
+from backend.llm.client import LLMClient
 from backend.graph.schemas import ProposalPackage, ProposalStatus
 from backend.storage.sqlite import SessionsRepo
 
@@ -27,6 +28,10 @@ class DecisionRequest(BaseModel):
 def create_app(db_path: str | None = None) -> FastAPI:
     app = FastAPI(title="novel_flow backend")
     repo = SessionsRepo(db_path or os.getenv("NOVEL_FLOW_DB", "novel_flow.db"))
+    llm_client = LLMClient()
+
+    def build_proposal(text: str, version: int, status: ProposalStatus) -> ProposalPackage:
+        return build_proposal_llm(text, version=version, status=status, client=llm_client)
 
     @app.get("/health")
     def health() -> dict[str, str]:
