@@ -40,6 +40,7 @@ def test_proposal_returns_required_keys(client: "TestClient") -> None:
         "open_questions",
         "version",
         "status",
+        "change_summary",
     ]:
         assert key in payload
 
