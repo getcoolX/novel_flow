@@ -2,34 +2,32 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
 from pydantic import ValidationError
 
-from backend.graph.schemas import ExpansionResult, OutlineLite, RequirementSpec
+from backend.graph.schemas import ExpansionResult, OutlineFull, OutlineLite, RequirementSpec, StoryBible
 
 
-@dataclass(slots=True)
 class LLMClient:
-    api_key: str | None = None
-    model_name: str | None = None
-    timeout_s: int = 30
-    max_retries: int = 3
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model_name: str = "gpt-4o-mini",
+        timeout_s: int = 30,
+        max_retries: int = 3,
+        temperature: float = 0,
+    ) -> None:
+        self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
+        self.model_name = model_name
+        self.timeout_s = timeout_s
+        self.max_retries = max_retries
+        self.temperature = temperature
 
-    def __post_init__(self) -> None:
-        if self.api_key is None:
-            self.api_key = os.getenv("OPENAI_API_KEY")
-        if self.model_name is None:
-            self.model_name = os.getenv("MODEL_NAME", "gpt-4.1-mini")
-
-    @property
-    def mock_mode(self) -> bool:
-        return not bool(self.api_key)
-
-    def generate_json(self, system_prompt: str, user_prompt: str, schema_name: str) -> dict[str, Any]:
-        if self.mock_mode:
+    def generate_json(self, *, system_prompt: str, user_prompt: str, schema_name: str) -> dict[str, Any]:
+        if not self.api_key:
             return self._mock_json(schema_name=schema_name, user_prompt=user_prompt)
 
         prompt = user_prompt
@@ -55,6 +53,8 @@ class LLMClient:
             "RequirementSpec": RequirementSpec,
             "ExpansionResult": ExpansionResult,
             "OutlineLite": OutlineLite,
+            "StoryBible": StoryBible,
+            "OutlineFull": OutlineFull,
         }
         model = validators.get(schema_name)
         if model is None:
@@ -65,6 +65,7 @@ class LLMClient:
         body = {
             "model": self.model_name,
             "response_format": {"type": "json_object"},
+            "temperature": self.temperature,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -134,5 +135,80 @@ class LLMClient:
                     "Chapter 7: Climax and decisive confrontation.",
                     "Chapter 8: Resolution and thematic closure.",
                 ]
+            }
+        if schema_name == "StoryBible":
+            return {
+                "title_working": "The Glass Ember",
+                "genre": "fantasy mystery",
+                "tone": "brooding but hopeful",
+                "pov": "first person",
+                "style_guide": {
+                    "diction": "contemporary with lyrical spikes",
+                    "sentence_length": "mostly medium, short in action",
+                    "dialogue_ratio": "40%",
+                    "taboo_list": ["anachronistic slang", "omniscient narration"],
+                    "examples": ["sensory detail anchored in emotion"],
+                },
+                "world": {
+                    "setting_time": "late industrial era",
+                    "setting_place": "river-city of Vael",
+                    "rules": ["binding magic requires true names"],
+                    "factions": ["Guild of Lamps", "Harbor Wardens"],
+                    "tech_or_magic_level": "mixed steampunk + ritual magic",
+                },
+                "characters": [
+                    {
+                        "name": "Iris Vale",
+                        "role": "protagonist investigator",
+                        "goal": "clear her brother's name",
+                        "flaw": "impulsive risk-taking",
+                        "secret": "she can hear bound names",
+                        "voice": "wry and observant",
+                        "relationships": ["protective of Tomas", "rivalry with Captain Roan"],
+                    }
+                ],
+                "timeline": [
+                    {"id": "T1", "event": "artifact theft", "when": "Day 0", "consequences": "city lockdown"}
+                ],
+                "canon_rules": ["No resurrection magic", "Magic leaves physical residue"],
+            }
+        if schema_name == "OutlineFull":
+            return {
+                "chapters": [
+                    {
+                        "index": 1,
+                        "title": "Ash on the River",
+                        "goal": "establish mystery",
+                        "conflict": "Iris is framed",
+                        "twist": "evidence points to Tomas",
+                        "hook": "Iris pockets forbidden residue",
+                        "locations": ["Dock Nine"],
+                        "characters_involved": ["Iris Vale", "Captain Roan"],
+                        "foreshadowing_in": ["F1"],
+                        "foreshadowing_out": [],
+                    }
+                ],
+                "character_arcs": [
+                    {
+                        "character": "Iris Vale",
+                        "start_state": "reactive and isolated",
+                        "key_turns": ["accepts help", "reveals secret"],
+                        "end_state": "trusted leader",
+                    }
+                ],
+                "foreshadowing_table": [
+                    {
+                        "id": "F1",
+                        "setup_chapter": 1,
+                        "payoff_chapter": 8,
+                        "description": "residue pattern matches a ward key",
+                        "evidence_style": "forensic breadcrumb",
+                    }
+                ],
+                "ending": {
+                    "type": "bittersweet victory",
+                    "final_reveal": "Guild master orchestrated theft",
+                    "emotional_resolution": "Iris reconciles with Tomas",
+                },
             }
         raise ValueError(f"Unsupported schema_name: {schema_name}")
